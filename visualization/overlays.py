@@ -226,7 +226,7 @@ def draw_footer(ax_footer, weights: dict, frame_idx: int, total_frames: int,
     # ── Weight display ──────────────────────────────────────────────────────
     w_text = "  ·  ".join([f"{k[:3].upper()}={v:.2f}" for k, v in weights.items()])
     ax_footer.text(
-        0.03, 0.65, f"ω  {w_text}",
+        0.03, 0.65, f"W  {w_text}",
         fontsize=7, color="#6688aa", fontfamily=FONT_FAMILY,
         va="center", ha="left", transform=ax_footer.transAxes,
     )
