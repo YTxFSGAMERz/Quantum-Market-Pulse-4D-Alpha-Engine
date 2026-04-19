@@ -107,9 +107,10 @@ def open_ffmpeg_pipe(output_path: Path, fps: int) -> subprocess.Popen:
         "-r", str(fps),
         "-i", "pipe:",
         "-vf", f"scale={OUT_W}:{OUT_H}",
-        "-c:v", "libx264",
-        "-preset", "slow",
-        "-crf", "18",
+        "-c:v", "h264_nvenc",
+        "-preset", "p6",
+        "-cq", "18",
+        "-rc", "vbr",
         "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",
         str(output_path),
@@ -121,6 +122,94 @@ def open_ffmpeg_pipe(output_path: Path, fps: int) -> subprocess.Popen:
         stderr=subprocess.DEVNULL,
     )
     return proc
+
+# ── Multiprocessing Worker ────────────────────────────────────────────────────
+import concurrent.futures
+import multiprocessing as mp
+
+g_E = None
+g_alpha_arr = None
+g_anomaly = None
+g_dates = None
+g_shocks = None
+g_price_df = None
+g_weights = None
+g_asset_names = None
+g_window = None
+g_total_frames = None
+g_T = None
+
+def _init_worker(E, alpha_arr, anomaly, dates, shocks, price_df, weights, asset_names, window, total_frames, T):
+    global g_E, g_alpha_arr, g_anomaly, g_dates, g_shocks, g_price_df, g_weights, g_asset_names, g_window, g_total_frames, g_T
+    g_E = E
+    g_alpha_arr = alpha_arr
+    g_anomaly = anomaly
+    g_dates = dates
+    g_shocks = shocks
+    g_price_df = price_df
+    g_weights = weights
+    g_asset_names = asset_names
+    g_window = window
+    g_total_frames = total_frames
+    g_T = T
+
+def _render_frame_worker(frame_idx: int) -> tuple[int, bytes]:
+    """Generates a single frame in an isolated process. Returns (frame_idx, rgb24_bytes)."""
+    import matplotlib.pyplot as plt
+    from visualization.scene import create_figure, _style_3d_ax
+    from visualization.camera import get_blended_view
+    from visualization.surface_renderer import draw_surface
+    from visualization.overlays import draw_all_overlays
+    
+    t_frac = frame_idx / max(g_total_frames - 1, 1)
+    t_idx  = int(g_window + t_frac * (g_T - 1 - g_window))
+    t_idx  = min(t_idx, g_T - 1)
+
+    elev, azim = get_blended_view(frame_idx, g_total_frames, intro_frames=180)
+
+    fig, ax_header, ax_3d, ax_heatmap, ax_ts, ax_footer = create_figure()
+
+    ax_3d.cla()
+    _style_3d_ax(ax_3d)
+
+    draw_surface(
+        ax=ax_3d,
+        E=g_E,
+        alpha_arr=g_alpha_arr,
+        anomaly=g_anomaly,
+        dates=g_dates,
+        t_idx=t_idx,
+        shocks=g_shocks,
+        frame_idx=frame_idx,
+        total_frames=g_total_frames,
+        window=g_window,
+    )
+
+    ax_3d.view_init(elev=elev, azim=azim)
+
+    draw_all_overlays(
+        ax_header=ax_header,
+        ax_heatmap=ax_heatmap,
+        ax_ts=ax_ts,
+        ax_footer=ax_footer,
+        price_df=g_price_df,
+        E=g_E,
+        alpha_arr=g_alpha_arr,
+        dates=g_dates,
+        t_idx=t_idx,
+        frame_idx=frame_idx,
+        total_frames=g_total_frames,
+        weights=g_weights,
+        asset_names=g_asset_names,
+    )
+
+    fig.canvas.draw()
+    rgba_buf = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
+    rgba_buf = rgba_buf.reshape(RENDER_H_PX, RENDER_W_PX, 4)
+    buf = np.ascontiguousarray(rgba_buf[:, :, :3]).tobytes()
+
+    plt.close(fig)
+    return frame_idx, buf
 
 
 # ── Main render loop ──────────────────────────────────────────────────────────
@@ -171,81 +260,48 @@ def render(args: argparse.Namespace) -> None:
     print(f"    Frame size: {RENDER_W_PX} × {RENDER_H_PX} px (render)  →  {OUT_W} × {OUT_H} px (output)")
     print(f"    Frames: {n_out}  |  Window: {args.window} days\n")
 
-    # ── Figure setup ──────────────────────────────────────────────────────
-    fig, ax_header, ax_3d, ax_heatmap, ax_ts, ax_footer = create_figure()
-
     # ── FFmpeg pipe ────────────────────────────────────────────────────────
     ffmpeg_proc = open_ffmpeg_pipe(output_path, args.fps)
 
     t0 = time.time()
     rendered = 0
 
+    max_workers = os.cpu_count() or 4
+    frames_list = list(frames_to_render)
+    next_expected_i = 0
+    frame_buffer = {}
+
+    print(f"🚀  Using {max_workers} processes for parallel rendering.\n")
+
     try:
-        for frame_idx in frames_to_render:
-            # Map frame index → data index (0 → window_size, total_frames-1 → T-1)
-            t_frac = frame_idx / max(total_frames - 1, 1)
-            t_idx  = int(args.window + t_frac * (T - 1 - args.window))
-            t_idx  = min(t_idx, T - 1)
-
-            # ── Camera ────────────────────────────────────────────────────
-            elev, azim = get_blended_view(frame_idx, total_frames, intro_frames=180)
-
-            # ── 3D surface (clear + redraw) ───────────────────────────────
-            ax_3d.cla()
-            from visualization.scene import _style_3d_ax
-            _style_3d_ax(ax_3d)
-
-            draw_surface(
-                ax=ax_3d,
-                E=E,
-                alpha_arr=alpha_arr,
-                anomaly=anomaly,
-                dates=dates,
-                t_idx=t_idx,
-                shocks=shocks,
-                frame_idx=frame_idx,
-                total_frames=total_frames,
-                window=args.window,
-            )
-
-            ax_3d.view_init(elev=elev, azim=azim)
-
-            # ── 2D overlays (in-place update) ─────────────────────────────
-            draw_all_overlays(
-                ax_header=ax_header,
-                ax_heatmap=ax_heatmap,
-                ax_ts=ax_ts,
-                ax_footer=ax_footer,
-                price_df=price_df,
-                E=E,
-                alpha_arr=alpha_arr,
-                dates=dates,
-                t_idx=t_idx,
-                frame_idx=frame_idx,
-                total_frames=total_frames,
-                weights=weights,
-                asset_names=asset_names,
-            )
-
-            # ── Render to raw RGB bytes → FFmpeg ──────────────────────────
-            fig.canvas.draw()
-            # matplotlib 3.8+: tostring_rgb removed; use buffer_rgba and strip alpha
-            rgba_buf = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
-            rgba_buf = rgba_buf.reshape(RENDER_H_PX, RENDER_W_PX, 4)
-            buf = np.ascontiguousarray(rgba_buf[:, :, :3])  # drop alpha → RGB24
-            ffmpeg_proc.stdin.write(buf.tobytes())
-
-            rendered += 1
-            if rendered % 30 == 0 or rendered == 1:
-                elapsed = time.time() - t0
-                fps_actual = rendered / max(elapsed, 1e-3)
-                remaining  = (n_out - rendered) / max(fps_actual, 0.001)
-                pct = 100 * rendered / n_out
-                print(
-                    f"\r  [{pct:5.1f}%]  frame {frame_idx:5d}  |  "
-                    f"{fps_actual:.2f} fr/s  |  ETA {remaining/60:.1f} min",
-                    end="", flush=True,
-                )
+        with concurrent.futures.ProcessPoolExecutor(
+            max_workers=max_workers,
+            initializer=_init_worker,
+            initargs=(E, alpha_arr, anomaly, dates, shocks, price_df, weights, asset_names, args.window, total_frames, T)
+        ) as executor:
+            futures = {executor.submit(_render_frame_worker, f_idx): f_idx for f_idx in frames_list}
+            
+            for future in concurrent.futures.as_completed(futures):
+                f_idx, buf = future.result()
+                frame_buffer[f_idx] = buf
+                
+                # Write sequentially
+                while next_expected_i < len(frames_list) and frames_list[next_expected_i] in frame_buffer:
+                    expected_f_idx = frames_list[next_expected_i]
+                    ffmpeg_proc.stdin.write(frame_buffer.pop(expected_f_idx))
+                    
+                    rendered += 1
+                    if rendered % 30 == 0 or rendered == 1:
+                        elapsed = time.time() - t0
+                        fps_actual = rendered / max(elapsed, 1e-3)
+                        remaining  = (n_out - rendered) / max(fps_actual, 0.001)
+                        pct = 100 * rendered / n_out
+                        print(
+                            f"\r  [{pct:5.1f}%]  frame {expected_f_idx:5d}  |  "
+                            f"{fps_actual:.2f} fr/s  |  ETA {remaining/60:.1f} min",
+                            end="", flush=True,
+                        )
+                    next_expected_i += 1
 
     except BrokenPipeError:
         print("\n⚠️  FFmpeg pipe closed unexpectedly. File may be truncated.")
@@ -255,7 +311,6 @@ def render(args: argparse.Namespace) -> None:
             ffmpeg_proc.wait(timeout=60)
         except Exception:
             ffmpeg_proc.kill()
-        plt.close(fig)
 
     elapsed = time.time() - t0
     size_mb = output_path.stat().st_size / 1e6 if output_path.exists() else 0
