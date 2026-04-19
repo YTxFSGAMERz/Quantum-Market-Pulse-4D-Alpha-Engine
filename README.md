@@ -2,6 +2,8 @@
 
 > **Cinematic 2K quantitative finance video** — the global market rendered as a living 3D energy field.
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/YTxFSGAMERz/Quantum-Market-Pulse-4D-Alpha-Engine/blob/main/Colab.ipynb)
+
 ## Output
 
 | | |
