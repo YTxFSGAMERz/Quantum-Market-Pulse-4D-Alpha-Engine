@@ -84,8 +84,8 @@ def create_figure() -> tuple:
     fig = plt.figure(
         figsize=(RENDER_W_IN, RENDER_H_IN),
         dpi=RENDER_DPI,
-        facecolor=BG_COLOR,
     )
+    fig.patch.set_alpha(0.0)  # Make figure perfectly transparent for PyVista composite
 
     # GridSpec: 5 rows, proportional heights
     gs = fig.add_gridspec(
@@ -100,9 +100,11 @@ def create_figure() -> tuple:
     ax_header = fig.add_subplot(gs[0])
     _style_flat_ax(ax_header)
 
-    # ── 3D surface ───────────────────────────────────────────────────────
-    ax_3d = fig.add_subplot(gs[1], projection="3d")
-    _style_3d_ax(ax_3d)
+    # ── 3D surface (now an invisible spacer for PyVista layer) ───────────
+    ax_3d = fig.add_subplot(gs[1])
+    ax_3d.set_facecolor((0, 0, 0, 0))
+    ax_3d.axis('off')
+
 
     # ── Alpha heatmap strip ──────────────────────────────────────────────
     ax_heatmap = fig.add_subplot(gs[2])

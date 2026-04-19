@@ -141,6 +141,7 @@ g_T = None
 
 def _init_worker(E, alpha_arr, anomaly, dates, shocks, price_df, weights, asset_names, window, total_frames, T):
     global g_E, g_alpha_arr, g_anomaly, g_dates, g_shocks, g_price_df, g_weights, g_asset_names, g_window, g_total_frames, g_T
+    global pv_engine  # PyVista GPU Engine instance
     g_E = E
     g_alpha_arr = alpha_arr
     g_anomaly = anomaly
@@ -153,39 +154,38 @@ def _init_worker(E, alpha_arr, anomaly, dates, shocks, price_df, weights, asset_
     g_total_frames = total_frames
     g_T = T
 
+    # Initialize the PyVista headless NVIDIA GPU Engine per child process
+    from visualization.pyvista_renderer import PyVistaGPU
+    # Set to matched high-res 1800x2400 dimensions for pixel-perfect layout alignment
+    from visualization.scene import RENDER_W_IN, RENDER_H_IN, RENDER_DPI
+    w_px = int(RENDER_W_IN * RENDER_DPI)
+    h_px = int(RENDER_H_IN * RENDER_DPI)
+    pv_engine = PyVistaGPU(w_px=w_px, h_px=h_px)
+
+
 def _render_frame_worker(frame_idx: int) -> tuple[int, bytes]:
     """Generates a single frame in an isolated process. Returns (frame_idx, rgb24_bytes)."""
     import matplotlib.pyplot as plt
     from visualization.scene import create_figure, _style_3d_ax
     from visualization.camera import get_blended_view
-    from visualization.surface_renderer import draw_surface
     from visualization.overlays import draw_all_overlays
     
     t_frac = frame_idx / max(g_total_frames - 1, 1)
     t_idx  = int(g_window + t_frac * (g_T - 1 - g_window))
     t_idx  = min(t_idx, g_T - 1)
 
-    elev, azim = get_blended_view(frame_idx, g_total_frames, intro_frames=180)
+    # 1. RENDER 3D FRAME ON NVIDIA GPU (PyVista)
+    t_start = max(0, t_idx - g_window)
+    t_end   = t_idx + 1
+    
+    E_win     = g_E[t_start:t_end, :]
+    alpha_win = g_alpha_arr[t_start:t_end, :]
+    anom_win  = g_anomaly[t_start:t_end, :]
+    
+    img_3d_gpu = pv_engine.render_3d_frame(E_win, alpha_win, anom_win)
 
-    fig, ax_header, ax_3d, ax_heatmap, ax_ts, ax_footer = create_figure()
-
-    ax_3d.cla()
-    _style_3d_ax(ax_3d)
-
-    draw_surface(
-        ax=ax_3d,
-        E=g_E,
-        alpha_arr=g_alpha_arr,
-        anomaly=g_anomaly,
-        dates=g_dates,
-        t_idx=t_idx,
-        shocks=g_shocks,
-        frame_idx=frame_idx,
-        total_frames=g_total_frames,
-        window=g_window,
-    )
-
-    ax_3d.view_init(elev=elev, azim=azim)
+    # 2. RENDER 2D UI ON CPU (Matplotlib)
+    fig, ax_header, _, ax_heatmap, ax_ts, ax_footer = create_figure()
 
     draw_all_overlays(
         ax_header=ax_header,
@@ -204,13 +204,28 @@ def _render_frame_worker(frame_idx: int) -> tuple[int, bytes]:
     )
 
     fig.canvas.draw()
-    rgba_buf = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
-    rgba_buf = rgba_buf.reshape(RENDER_H_PX, RENDER_W_PX, 4)
-    buf = np.ascontiguousarray(rgba_buf[:, :, :3]).tobytes()
+    img_2d_ui = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
+    
+    from visualization.scene import RENDER_W_IN, RENDER_H_IN, RENDER_DPI
+    w_px = int(RENDER_W_IN * RENDER_DPI)
+    h_px = int(RENDER_H_IN * RENDER_DPI)
+    img_2d_ui = img_2d_ui.reshape(h_px, w_px, 4)
 
     plt.close(fig)
     import gc
     gc.collect()
+
+    # 3. ALPHA-COMPOSITE BLEND
+    # img_2d_ui has transparent background, so it flawlessly overlays img_3d_gpu
+    alpha_fg = img_2d_ui[:, :, 3] / 255.0
+    alpha_bg = 1.0 - alpha_fg
+
+    final_img = np.empty((h_px, w_px, 3), dtype=np.uint8)
+    for c in range(3):
+        final_img[:, :, c] = (alpha_fg * img_2d_ui[:, :, c] + alpha_bg * img_3d_gpu[:, :, c]).astype(np.uint8)
+
+    buf = np.ascontiguousarray(final_img).tobytes()
+
     return frame_idx, buf
 
 
