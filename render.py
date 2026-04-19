@@ -209,6 +209,8 @@ def _render_frame_worker(frame_idx: int) -> tuple[int, bytes]:
     buf = np.ascontiguousarray(rgba_buf[:, :, :3]).tobytes()
 
     plt.close(fig)
+    import gc
+    gc.collect()
     return frame_idx, buf
 
 
@@ -274,15 +276,14 @@ def render(args: argparse.Namespace) -> None:
     print(f"🚀  Using {max_workers} processes for parallel rendering.\n")
 
     try:
-        with concurrent.futures.ProcessPoolExecutor(
-            max_workers=max_workers,
+        with mp.Pool(
+            processes=max_workers,
             initializer=_init_worker,
-            initargs=(E, alpha_arr, anomaly, dates, shocks, price_df, weights, asset_names, args.window, total_frames, T)
-        ) as executor:
-            futures = {executor.submit(_render_frame_worker, f_idx): f_idx for f_idx in frames_list}
+            initargs=(E, alpha_arr, anomaly, dates, shocks, price_df, weights, asset_names, args.window, total_frames, T),
+            maxtasksperchild=10
+        ) as pool:
             
-            for future in concurrent.futures.as_completed(futures):
-                f_idx, buf = future.result()
+            for f_idx, buf in pool.imap_unordered(_render_frame_worker, frames_list):
                 frame_buffer[f_idx] = buf
                 
                 # Write sequentially
