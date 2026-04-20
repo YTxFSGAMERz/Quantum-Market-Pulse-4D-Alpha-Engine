@@ -39,12 +39,12 @@ DIM_GRID    = "#111133"
 TEXT_COLOR  = "#e0e0ff"
 
 # Render resolution
-RENDER_W_IN   = 12.0    # figure width  (inches)
-RENDER_H_IN   = 16.0    # figure height (inches)
-RENDER_DPI    = 150     # → 1800 × 2400 px  (downscaled to 1440×1920 by ffmpeg)
+RENDER_W_IN   = 4.5     # figure width  (inches)
+RENDER_H_IN   = 8.0     # figure height (inches)
+RENDER_DPI    = 160     # → 720 × 1280 px  (720p portrait)
 
 # Output resolution (passed to FFmpeg vf=scale)
-OUT_W, OUT_H  = 1440, 1920
+OUT_W, OUT_H  = 720, 1280
 
 # Frame rate
 FPS = 120
