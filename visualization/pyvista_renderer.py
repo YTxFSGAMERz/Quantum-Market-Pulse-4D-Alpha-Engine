@@ -31,8 +31,16 @@ class PyVistaGPU:
         Renders the highly mathematical 3D structures purely on the GPU.
         Returns a Numpy RGBA (1440, 1920, 4) uncompressed transparent image.
         """
-        # We MUST clear previous meshes purely.
-        self.plotter.clear()
+        # Remove previous actors cleanly instead of global clear() which intermittently destroys axes
+        if getattr(self, 'mesh_actor', None):
+            self.plotter.remove_actor(self.mesh_actor)
+            self.mesh_actor = None
+        if getattr(self, 'halo_actor', None):
+            self.plotter.remove_actor(self.halo_actor)
+            self.halo_actor = None
+        if getattr(self, 'core_actor', None):
+            self.plotter.remove_actor(self.core_actor)
+            self.core_actor = None
 
         # Build Mesh Grid Data (Float32 to prevent PyVista warnings)
         W, A = E_win.shape
@@ -65,7 +73,7 @@ class PyVistaGPU:
         grid.point_data["colors"] = (flat_colors * 255).astype(np.uint8)
 
         # 1) Main Surface Mesh
-        self.plotter.add_mesh(
+        self.mesh_actor = self.plotter.add_mesh(
             grid,
             scalars="colors",
             rgb=True,
@@ -95,7 +103,7 @@ class PyVistaGPU:
             cloud.point_data["intensity"] = anom_alpha
             
             # Outer halo
-            self.plotter.add_mesh(
+            self.halo_actor = self.plotter.add_mesh(
                 cloud,
                 render_points_as_spheres=True,
                 point_size=18.0,
@@ -106,7 +114,7 @@ class PyVistaGPU:
                 lighting=False
             )
             # Inner bright core
-            self.plotter.add_mesh(
+            self.core_actor = self.plotter.add_mesh(
                 cloud,
                 render_points_as_spheres=True,
                 point_size=6.0,
@@ -117,20 +125,21 @@ class PyVistaGPU:
                 lighting=True
             )
 
-        # Add 3D Bounding box and grid axes so it looks like the mathematical reference
-        self.plotter.show_bounds(
-            grid='front', 
-            location='outer', 
-            all_edges=False, 
-            color='#6688aa',
-            axes_ranges=[0, 90, 0, 4, 0, 1], # logical ticks instead of projected coordinates
-            fmt="%.1f"
-        )
-
         # Matplotlib used elev=45, azim=225. 
         # By pulling distance * 2.2 we isolate the 3D topology 
         if self.first_render:
-            bounds = grid.bounds
+            # Add 3D Bounding box exactly once so its axes define the world perfectly unconditionally
+            self.plotter.show_bounds(
+                grid='front', 
+                location='outer', 
+                all_edges=False, 
+                color='#6688aa',
+                axes_ranges=[0, 90, 0, 4, 0, 1],
+                bounds=[0, W-1, 0, target_A-1, 0, Z_SCALE], # explicitly hardcode bounds to stop it jittering
+                fmt="%.1f"
+            )
+            
+            bounds = [0, W-1, 0, target_A-1, 0, Z_SCALE]
             center = ((bounds[0]+bounds[1])/2, (bounds[2]+bounds[3])/2, (bounds[4]+bounds[5])/2)
             # Pull distance mathematically
             distance = max(bounds[1]-bounds[0], bounds[3]-bounds[2]) * 2.8
