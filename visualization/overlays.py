@@ -51,13 +51,13 @@ def draw_header(ax_header, dates: pd.DatetimeIndex, t_idx: int,
 
     # ── Title ──────────────────────────────────────────────────────────────
     ax_header.text(
-        0.03, 0.82, "QUANTUM MARKET PULSE",
-        fontsize=18, fontweight="bold", fontfamily=FONT_FAMILY,
+        0.03, 0.84, "QUANTUM MARKET PULSE",
+        fontsize=11.5, fontweight="bold", fontfamily=FONT_FAMILY,
         color=TEXT_COLOR, va="top", ha="left", transform=ax_header.transAxes,
     )
     ax_header.text(
-        0.03, 0.50, "4D ALPHA ENGINE  ·  ENERGY FIELD ANALYSIS",
-        fontsize=9, fontfamily=FONT_FAMILY,
+        0.03, 0.52, "4D ALPHA ENGINE  ·  ENERGY FIELD ANALYSIS",
+        fontsize=5.5, fontfamily=FONT_FAMILY,
         color=ACCENT, va="top", ha="left", transform=ax_header.transAxes,
         alpha=0.85,
     )
@@ -65,8 +65,8 @@ def draw_header(ax_header, dates: pd.DatetimeIndex, t_idx: int,
     # ── Date readout ───────────────────────────────────────────────────────
     date_str = current_date.strftime("%d %b %Y")
     ax_header.text(
-        0.97, 0.82, date_str,
-        fontsize=14, fontweight="bold", fontfamily=FONT_FAMILY,
+        0.97, 0.84, date_str,
+        fontsize=9, fontweight="bold", fontfamily=FONT_FAMILY,
         color=ACCENT, va="top", ha="right", transform=ax_header.transAxes,
     )
 
@@ -74,26 +74,26 @@ def draw_header(ax_header, dates: pd.DatetimeIndex, t_idx: int,
     e_vals  = E[min(t_idx, E.shape[0] - 1), :]
     a_vals  = alpha_arr[min(t_idx, alpha_arr.shape[0] - 1), :]
     n       = min(len(asset_names), len(e_vals))
-    x_start = 0.60
+    x_start = 0.55
 
     for i in range(n):
         col_dir = BULL_COLOR if a_vals[i] > 0.1 else (BEAR_COLOR if a_vals[i] < -0.1 else NEUT_COLOR)
         arrow   = "▲" if a_vals[i] > 0.05 else ("▼" if a_vals[i] < -0.05 else "◆")
-        xpos    = x_start + i * 0.095
+        xpos    = x_start + i * 0.12
 
         ax_header.text(
             xpos, 0.45, asset_names[i],
-            fontsize=7, color="#8899cc", fontfamily=FONT_FAMILY,
+            fontsize=6, color="#8899cc", fontfamily=FONT_FAMILY,
             va="center", ha="center", transform=ax_header.transAxes,
         )
         ax_header.text(
             xpos, 0.18, f"{e_vals[i]:.2f}",
-            fontsize=9, fontweight="bold", color=col_dir,
+            fontsize=8, fontweight="bold", color=col_dir,
             fontfamily=FONT_FAMILY, va="center", ha="center", transform=ax_header.transAxes,
         )
         ax_header.text(
-            xpos + 0.025, 0.18, arrow,
-            fontsize=7, color=col_dir,
+            xpos + 0.035, 0.18, arrow,
+            fontsize=6, color=col_dir,
             va="center", ha="left", transform=ax_header.transAxes,
         )
 

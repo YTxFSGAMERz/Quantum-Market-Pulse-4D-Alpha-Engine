@@ -132,7 +132,8 @@ class PyVistaGPU:
         if self.first_render:
             bounds = grid.bounds
             center = ((bounds[0]+bounds[1])/2, (bounds[2]+bounds[3])/2, (bounds[4]+bounds[5])/2)
-            distance = max(bounds[1]-bounds[0], bounds[3]-bounds[2]) * 2.2
+            # Pull distance mathematically
+            distance = max(bounds[1]-bounds[0], bounds[3]-bounds[2]) * 2.8
             
             import math
             elev = math.radians(35)
@@ -142,7 +143,15 @@ class PyVistaGPU:
             cy = center[1] + distance * math.cos(elev) * math.cos(azim)
             cz = center[2] + distance * math.sin(elev)
             
-            self.plotter.camera_position = [(cx, cy, cz), center, (0, 0, 1)]
+            # To move the mesh UP on the screen, we look significantly BELOW the center (deep into the mesh's base)
+            # This causes the camera to tilt up
+            focal_point = (center[0], center[1], center[2] - (bounds[5] - bounds[4]) * 0.8)
+            
+            self.plotter.camera_position = [(cx, cy, cz), focal_point, (0, 0, 1)]
+            
+            # Explicitly force a zoom out to make it fit easily into the vertical boundaries
+            self.plotter.camera.zoom(0.65)
+            
             self.first_render = False
 
         # Read back the buffer from the GPU
