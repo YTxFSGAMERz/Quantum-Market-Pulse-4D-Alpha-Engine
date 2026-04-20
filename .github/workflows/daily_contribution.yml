@@ -1,0 +1,39 @@
+name: Daily Automated Contribution
+
+on:
+  schedule:
+    # Runs at 08:00 UTC every day
+    - cron: '0 8 * * *'
+  workflow_dispatch: # Allows you to manually trigger it from the Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  contribute:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate daily activity
+        run: |
+          # We update a simple hidden log file to register a valid file change
+          echo "Automated contribution registered: $(date)" >> .github/daily_activity.log
+
+      - name: Commit and Push
+        run: |
+          # IMPORTANT: For this to color your personal GitHub contribution graph green, 
+          # you must change the email below to the exact email address linked to your GitHub account!
+          git config --local user.email "your.github.email@example.com"
+          git config --local user.name "GitHub Actions Bot"
+          
+          git add .github/daily_activity.log
+          
+          # Only commit if changes exist
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore: 🟢 automated daily contribution"
+            git push
+          fi
